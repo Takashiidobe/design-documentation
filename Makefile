@@ -8,6 +8,8 @@ pdf:
 	./bin/pdf
 deps:
 	./bin/deps
+clean:
+	rm -rf output/
 netlify:
 	./bin/netlify
 deploy:

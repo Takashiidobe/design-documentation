@@ -1,187 +1,91 @@
-# Design for Project 0
+# Why write a Design Doc?
 
-## Part 1: Scheduler Class
+- Discussing possible implementations to answer a problem without actually building prototypes
+- Building consensus around a design in the organization
+- Knowledge sharing
+- Act as an artifact that explains what engineers were thinking before solving the problem (and subsequently, if that changes).
 
-A FIFO scheduler needs to maintain a FIFO queue of threads. Add a private member to Scheduler,
+## What is a Design Doc?
 
-```cpp
-    List<Thread*>* readyList;
-```
+You're free to write them in any form you see fit, but here are some cookie cutter ideas to think about:
 
-The Scheduler constructor initializes readyList to an empty `List<Thread*>`, and the Scheduler destructor deletes it.
+### Context and Scope
 
-Scheduler::ReadyToRun simply enqueues a thread by appending it to the end of the ready list:
+Try to answer these questions:
 
-```cpp
-    Scheduler::ReadyToRun(Thread* thread)
-        append thread to readyList
-```
+- What are we trying to build?
+- Why are we building this?
+- What is the problem we are solving with this design?
 
-Scheduler::FindNextToRun dequeues a thread by removing a thread from the front of the ready list. If no threads are on the ready list, returns null.
+### Goals and Non-goals
 
-```cpp
-    Scheduler::FindNextToRun()
-        if readyList is empty
-            return null
-        else
-            remove thread from front of readyList
-            return thread
-```
+Try to answer these questions:
 
-Lastly, Scheduler::Run switches from the current thread to the specified thread. At this point, not much needs to be done: just set kernel->currentThread to the next thread, then call SWITCH. Note that if you don't set kernel->currentThread before calling SWITCH, it's really hard for the next thread to figure out who it is.
+- What are some must-haves of the system?
+  - How much performance is expected?
+  - How many users do we expect to use our system?
+  - What features do our users really need?
+- What are some things that we don't care about?
+  - Does it matter that we allow API access?
 
-```cpp
-    Scheduler::Run(Thread* nextThread)
-        set oldThread to kernel->currentThread
-        set kernel->currentThread to nextThread
-        SWITCH(oldThread, nextThread)
-```
+## Design
 
-## Part 2: Thread Class
+In the design section, you'll want to write down the trade-offs you propose making.
+Given the facts, goals and non-goals, try to discuss some possible solutions and show why one solution (the one you choose) is the best for the problem at hand.
 
-There are only two pieces of important information that a TCB must store: (1) the thread's register set, and (2) information about the stack (used on thread termination to delete the stack). Both of these pieces are already contained in the Thread class, so no additional state will be added.
+### Diagrams
 
-ThreadRoot calls Thread::Begin right before it calls the function being forked to. Thread::Begin must complete all Thread initialization that couldn't be done while the thread wasn't yet running. For now, nothing falls in this category, so Thread::Begin can remain empty.
+It is important to explain the context of the system with diagrams. Including a `system-context-diagram` which explains how the proposed solution fits in with other parts of the system is helpful.
 
-Thread::Yield tries to find another thread to run by calling Scheduler::FindNextToRun(). If it is successful, it moves the current thread to the ready list, and runs the other thread.
+### APIs
 
-```cpp
-    Thread::Yield()
-        set nextThread to kernel->scheduler->FindNextToRun()
-        if nextThread is non-null
-            kernel->scheduler->ReadyToRun(this)
-            kernel->scheduler->Run(nextThread)
-```
+If the system has a callable API, it is a good idea to sketch it out. Try to avoid putting down an actual code interface, instead, try to provide ways how a user might use the API.
 
-Thread::Sleep also tries to find another thread to run by calling Scheduler::FindNextToRun(). If it is successful, it runs the other thread. Otherwise, it calls Interrupt::Idle to busy wait (effectively) for an interrupt. Since no threads are scheduled to run, only an interrupt can give us anything to do.
+### Data Storage
 
-```cpp
-    Thread::Sleep()
-        set nextThread to kernel->scheduler->FindNextToRun()
-        while nextThread is null
-            kernel->interrupt->Idle()
-            set nextThread to kernel->scheduler->FindNextToRun()
-        kernel->scheduler->Run(nextThread)
-```
+If the system uses or processes data, it's a good idea to discuss how you'll plan to store the data, or otherwise process it, focusing on the tradeoffs of potential technologies/methodologies.
 
-Thread::Fork prepares a thread to be run, and then places the thread on the ready list. For now, this preparation consists only of calling StackAllocate() to prepare the thread's stack and register set.
+### Code
 
-```cpp
-    Thread::Fork(VoidFunctionPtr func, void* arg)
-        StackAllocate(func, arg)
-        kernel->scheduler->ReadyToRun(this)
-```
+If this requires a novel approach to code up, a small prototype of an algorithm or explanation of how the system will work should suffice here.
 
-Thread::Finish is called when the thread is voluntarily terminating. This is either because the forked function explicitly called Thread::Finish, or because the forked function returned to ThreadRoot, which calls Thread::Finish as a last step. This thread must be destroyed, but it can't be destroyed right now because it's the current thread. Instead, the current thread is scheduled to be destroyed later and put to sleep. To accomplish this, add another private member to the Scheduler class, initialized to null by the Scheduler constructor:
+### Degree of Constraint
 
-```cpp
-    Thread* toBeDestroyed;
-```
+Is this a greenfield software project, where you have free reign to do whatever you want? Is this project a rearchitecting of a previous system? If so, you'll want to explain which of the two it is, and how many resources you have for either, so you can focus on the necessary conditions to deem the project complete.
 
-Add a public method, Scheduler::CheckToBeDestroyed(), that checks toBeDestroyed and destroys it if it is non-null:
+### Alternatives
 
-```cpp
-    Scheduler::CheckToBeDestroyed()
-        if toBeDestroyed is non-null
-            delete toBeDestroyed
-            set toBeDestroyed to null
-```
+You'll want to discuss other alternative solutions you and your team thought of and discuss why you selected the solution that is the topic of the Design Doc.
 
-Add a flag to Thread::Sleep() and Scheduler::Run(), bool finishing, that is TRUE if the thread giving up the processor is finishing. Thread::Sleep() passes this flag on to Scheduler::Run() after it finds another thread to run:
+### Cross-cutting concerns
 
-```cpp
-    Thread::Sleep(bool finishing)
-        ...
-        kernel->scheduler->Run(nextThread, finishing)
-```
+Discuss cross cutting concerns here, like security, privacy, ops load, and infrastructure burden. If you require a lot of buy-in from other teams, explain why you will and how you'll do that. If you're lowering the support burden for another team with this project (e.g. this new project lowers support tickets) you'll want to explain why this will do so and how much you expect the support burden to decrease.
 
-Scheduler::Run checks this flag, and if it is set, sets toBeDestroyed to the current thread:
+### Length
 
-```cpp
-    Scheduler::Run(Thread* nextThread, bool finishing)
-        set oldThread to kernel->currentThread
-        if finishing is TRUE
-            set toBeDestroyed to oldThread
-        set kernel->currentThread to nextThread
-        SWITCH(oldThread, nextThread)
-```
+Design docs can vary from 1-3 pages (a mini) to 20+ pages (a large feature set). Pick the length that fits most with your topic. Try to keep it as terse and succinct as possible, since that'll help your readers understand the problem and solutions.
 
-Therefore Thread::Finish() is simply a call to Thread::Sleep():
+## Lifecycle of a Design Doc
 
-```cpp
-    Thread::Finish()
-        Sleep(TRUE)
-```
+1. Rapid iteration
+2. Review
+3. Implementation and iteration
+4. Maintenance and learning
 
-Scheduler::CheckToBeDestroyed() must be called immediately after every context switch (i.e. every time SWITCH returns). There are two places that SWITCH can return to. The first, more obvious one is Scheduler::Run():
+### Rapid iteration
 
-```cpp
-    Scheduler::Run(Thread* nextThread, bool finishing)
-        ...
-        SWITCH(oldThread, nextThread)
-        CheckToBeDestroyed()
-```
+You write the doc with some co-authors, and work to flesh it out. When you've led the doc to a stable point, you'll want to get some reviewers on it.
 
-The second place is less obvious. When a thread is forked, SWITCH actually returns to ThreadRoot, not to Scheduler::Run. ThreadRoot first calls Thread::Begin, which we now have a use for:
+### Review
 
-```cpp
-    Thread::Begin()
-        kernel->scheduler->CheckToBeDestroyed()
-```
+You'll want to select a few people to review your design doc, and at their own leisure, giving them tools to provide feedback (e.g. on Google docs), or through version control. You can establish a mailing list or other pipeline at your company where senior members can review documents, and other members can propose them at any time, allowing for asynchronous communication.
 
-## Part 3: Preemption
+### Implementation and iteration
 
-Preemption significantly complicates things because it requires that the timer interrupt handler be allowed to call Thread::Yield(), which in turn accesses and modifies the ready list. We therefore require that interrupts already be disabled whenever anybody calls Scheduler::ReadyToRun, Scheduler::FindNextToRun, Scheduler::Run, or Scheduler::CheckToBeDestroyed. The direct implications of this are that Thread::Yield, Thread::Sleep, and Thread::Fork must ensure interrupts are disabled before calling Scheduler methods. For simplicity we require that interrupts already be disabled whenever Thread::Sleep is called. This requires a change to Thread::Finish():
+When review has mainly wrapped up, you're ready to implement the system. Be prepared to make lots of changes to the design as you do this, since lots of things will pop up while implementing a system. If the facts change, change your mind. And the docs. You may want to add a note saying why this change was made and why a previous assumption was wrong in the doc as well, so people reading the doc afterwards can understand your frame of mind.
 
-```cpp
-    Thread::Finish()
-        kernel->interrupt->setLevel(IntOff)
-        Sleep(TRUE)
-```
+### Maintenance and learning
 
-Thread::Yield and Thread::Fork will disable interrupts on entry and restore them on exit:
+It is important to keep the Design doc in sync with the system -- it is an entry point for new engineers joining a team, and one of the first resources they will reach for (along with more structured documentation). Always look at your design docs a while later, so you can figure out what you got right, wrong, how to improve, and how to edit the design doc so it's helpful for readers in the future.
 
-```cpp
-    Thread::Yield()
-        DisableInterrupts()
-        ...
-        RestoreInterrupts()
-
-    Thread::Fork(VoidFunctionPtr func, void* arg)
-        StackAllocate(func, arg)
-        DisableInterrupts()
-        kernel->scheduler->ReadyToRun(this)
-        RestoreInterrupts()
-```
-
-Since interrupts are disabled when Scheduler::Run() is called, interrupts are also disabled when SWITCH is called, and when it returns. Since SWITCH returns to ThreadRoot when a thread runs for the first time, Thread::Begin is called with interrupts disabled. However, we want the forked function to be called with interrupts enabled. So Thread::Begin should enable interrupts after calling Scheduler::CheckToBeDestroyed():
-
-```cpp
-    Thread::Begin()
-        kernel->scheduler->CheckToBeDestroyed()
-        kernel->interrupt->SetLevel(IntOn)
-```
-
-Now it is safe to call Thread::Yield() from within the timer interrupt handler, so we can move on to the Alarm class.
-
-Create an Alarm class, derived from CallBackObj. Alarm has one private member:
-
-```cpp
-    Timer* timer;
-```
-
-The Alarm constructor points timer at a new Timer, using the alarm object as the callback object, and not using random time-slicing for now:
-
-```cpp
-    Alarm::Alarm()
-        timer = new Timer(FALSE, this)
-```
-
-The Alarm destructor destroys the timer. The Alarm callback tells the Interrupt object to yield on return. This will cause Thread::Yield() to be called on the current thread before the interrupt handler returns.
-
-```cpp
-    Alarm::CallBack()
-        kernel->interrupt->YieldOnReturn()
-```
-
-[Next](./part-2.md)
+[Example](./example.md)

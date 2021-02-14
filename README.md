@@ -16,3 +16,4 @@ If you'd like to see a deployed version of this repository: [Demo](https://desig
 - Run `make pdf` to generate only a PDF version.
 - Run `make docx` to generate only a DOCX version.
 - Run `make deploy` to deploy the site to production.
+- Run `make clean` to delete any generated files.
